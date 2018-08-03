@@ -25,7 +25,8 @@ function getFeatureInfoBuilder(esriBundle) {
 
         // result return type is text unless we have a fancy case
         const customReturnType = {
-            "application/json": "json"
+            "application/json": "json",
+            "application/vnd.geo+json": "json"
         };
 
         const returnType = customReturnType[mimeType] || "text";
