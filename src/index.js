@@ -8,6 +8,7 @@ const legend = require('./legend.js');
 const esriMap = require('./map/esriMap.js');
 const proj = require('./proj.js');
 const query = require('./query.js');
+const rql = require('./rql.js');
 const shared = require('./shared.js');
 const symbology = require('./symbology.js');
 
@@ -24,6 +25,7 @@ function initAll(esriBundle, window) {
     api.hilight = hilight(esriBundle, api);
     api.events = events();
     api.query = query(esriBundle);
+    api.rql = rql();
     api.shared = shared(esriBundle);
     api.agol = agol(esriBundle);
     api.debug = function () {
