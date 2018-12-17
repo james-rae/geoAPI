@@ -1,22 +1,30 @@
 'use strict';
 
-//RQL implemented without Dojo
-//original Dojo implementation:  https://github.com/kriszyp/rql
+/*
+Right, what's all this then?
 
-//creates three classes:  RqlParser, RqlQuery, RqlArray
-//main usage is RqlArray.executeQuery(query, options, data)
-//the other two classes are used by RqlArray to parse and execute the queries.
-//
-//basic example
-// 
-//   var ra = new RqlArray(),
-//       data = [{name: "Danbo", age: 25}, {name: "Jimbo", age: 45}, {name: "Hambo", age: 31}],
-//       query = "lt(age,40)",
-//       result;
-//   result = ra.executeQuery(query, {}, data);
-//
-// the contents of result would be  [{name: "Danbo", age: 25}, {name: "Hambo", age: 31}]
+RQL is a library/language(?) that lets you execute a query on javascript objects. We primarily use it to search for things
+in arrays of objects, using an RQL query string to define the search conditions.
 
+The original implementation ( https://github.com/kriszyp/rql ) and its npm library (  https://www.npmjs.com/package/rql )
+are older and are based around the AMD style library loader.  Our current webpack engine can't process it.
+Years ago I attempted to write a stand-alone port of it that didn't depend on AMD ( https://github.com/james-rae/rql-nodojo ).
+That repo's readme.md has lots of documentation about how to form various query strings.
+
+For now, I've simply dumped that ported code into a module, and exposed a function that executes the one thing we commonly do.
+The module means the "classes" are not on the global scope, as they were in my stellar port.
+So at the momement a lot of code conventions are broken in this file. We can revist and clean up / turn into module /
+attempt to fork and update the official npm version / etc. But thats for later. Note that the code below has lots of
+dependance on what `this` is pointing to, so it's not a matter of just slapping it into a class structure. Sometimes
+you need the old broken javascript `this` behavior.
+
+As of now this module works and will be treated as a black box that does what its told.
+
+*/
+
+// creates three "classes":  RqlParser, RqlQuery, RqlArray
+// main usage for us is RqlArray.executeQuery(query, options, data). this has also received the majority of testing.
+// the other two classes are used by RqlArray to parse and execute the queries.
 
 //---------------------------
 // Parser Class
@@ -24,29 +32,29 @@
 // used to parse query strings into query objects 
 //---------------------------
 
-//object constructer
+// object constructer
 var RqlParser = function () {
     var that = this;
 
     this.operatorMap = {
-        "=": "eq",
-        "==": "eq",
-        ">": "gt",
-        ">=": "ge",
-        "<": "lt",
-        "<=": "le",
-        "!=": "ne"
+        '=': 'eq',
+        '==': 'eq',
+        '>': 'gt',
+        '>=': 'ge',
+        '<': 'lt',
+        '<=': 'le',
+        '!=': 'ne'
     };
 
     this.commonOperatorMap = {
-        "and": "&",
-        "or": "|",
-        "eq": "=",
-        "ne": "!=",
-        "le": "<=",
-        "ge": ">=",
-        "lt": "<",
-        "gt": ">"
+        and: '&',
+        or: '|',
+        eq: '=',
+        ne: '!=',
+        le: '<=',
+        ge: '>=',
+        lt: '<',
+        gt: '>'
     };
 
     this.primaryKeyName = 'id';
@@ -54,50 +62,50 @@ var RqlParser = function () {
     this.jsonQueryCompatible = true;
 
     this.autoConverted = {
-        "true": true,
-        "false": false,
-        "null": null,
-        "undefined": undefined,
-        "Infinity": Infinity,
-        "-Infinity": -Infinity
+        'true': true,
+        'false': false,
+        'null': null,
+        'undefined': undefined,
+        'Infinity': Infinity,
+        '-Infinity': -Infinity
     };
 
-    //big mapping of converter functions (functions that convert data to values in their proper data type)
+    // big mapping of converter functions (functions that convert data to values in their proper data type)
     this.converters = {
-        //auto. attempt basic conversion for keywords, numbers, strings, dates
+        // auto. attempt basic conversion for keywords, numbers, strings, dates
         auto: function (string) {
-            //keywords
+            // keywords
             if (that.autoConverted.hasOwnProperty(string)) {
                 return that.autoConverted[string];
             }
-            //number check
+            // number check
             var number = +string;
 
             if (isNaN(number) || number.toString() !== string) {
                 string = decodeURIComponent(string);
                 if (that.jsonQueryCompatible) {
-                    //if wrapped in single quotes, switch to be wrapped in double quotes. then parse as JSON
+                    // if wrapped in single quotes, switch to be wrapped in double quotes. then parse as JSON
                     if (string.charAt(0) == "'" && string.charAt(string.length - 1) == "'") {
                         return JSON.parse('"' + string.substring(1, string.length - 1) + '"');
                     }
                 }
-                //string
+                // string
                 return string;
             }
-            //number
+            // number
             return number;
         },
         number: function (x) {
             var number = +x;
             if (isNaN(number)) {
-                throw new URIError("Invalid number " + number);
+                throw new URIError('Invalid number ' + number);
             }
             return number;
         },
         epoch: function (x) {
             var date = new Date(+x);
             if (isNaN(date.getTime())) {
-                throw new URIError("Invalid date " + x);
+                throw new URIError('Invalid date ' + x);
             }
             return date;
         },
@@ -110,19 +118,19 @@ var RqlParser = function () {
         },
         date: function (x) {
             var isoDate = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2}(?:\.\d*)?)Z$/.exec(x),
-				dDate;
+                dDate;
             if (isoDate) {
                 dDate = new Date(Date.UTC(+isoDate[1], +isoDate[2] - 1, +isoDate[3], +isoDate[4], +isoDate[5], +isoDate[6]));
             } else {
                 dDate = new Date(x);
             }
             if (isNaN(dDate.getTime())) {
-                throw new URIError("Invalid date " + x);
+                throw new URIError('Invalid date ' + x);
             }
             return dDate;
         },
-        "boolean": function (x) {
-            return x === "true";
+        'boolean': function (x) {
+            return x === 'true';
         },
         string: function (string) {
             return decodeURIComponent(string);
@@ -141,14 +149,14 @@ var RqlParser = function () {
         }
     };
 
-    //set the default converter to the auto-converter function
-    this.converters["default"] = this.converters.auto;
+    // set the default converter to the auto-converter function
+    this.converters['default'] = this.converters.auto;
 };
 
-//main parse function
+// main parse function
 RqlParser.prototype.parse = function (query, parameters) {
-    //init bad input
-    if (typeof query === "undefined" || query === null) {
+    // init bad input
+    if (typeof query === 'undefined' || query === null) {
         query = '';
     }
 
@@ -157,121 +165,121 @@ RqlParser.prototype.parse = function (query, parameters) {
     var topTerm = term;
     topTerm.cache = {}; // room for lastSeen params
 
-    //lets start parsing this query
-    if (typeof query === "object") {
+    // lets start parsing this query
+    if (typeof query === 'object') {
         if (query instanceof RqlQuery) {
-            //its already parsed!
+            // its already parsed!
             return query;
         }
-        //not sure what this does.
-        //if query is an object, but not an RqlQuery, go through the object properties and turn them into query terms.
-        //TODO revisit with better explanation. it may be this is not used when parsing string-based queries, only funny chained functions
+        // not sure what this does.
+        // if query is an object, but not an RqlQuery, go through the object properties and turn them into query terms.
+        // TODO revisit with better explanation. it may be this is not used when parsing string-based queries, only funny chained functions
         for (var i in query) {
             var qTerm = new RqlQuery();
             topTerm.args.push(qTerm);
-            qTerm.name = "eq";
+            qTerm.name = 'eq';
             qTerm.args = [i, query[i]]; //property-value pair array
         }
         return topTerm;
     }
 
-    //I WILL NOT TOLERATE YOUR QUESTION MARK INSOLENCE
-    if (query.charAt(0) == "?") {
-        throw new URIError("Query must not start with ?");
+    // I WILL NOT TOLERATE YOUR QUESTION MARK INSOLENCE
+    if (query.charAt(0) == '?') {
+        throw new URIError('Query must not start with ?');
     }
 
-    //as far as i can tell, jsonQueryCompatible is always true
-    //replace angle bracket symbols ( >= <= > < ) with text formula equivalents
+    // as far as i can tell, jsonQueryCompatible is always true
+    // replace angle bracket symbols ( >= <= > < ) with text formula equivalents
     if (this.jsonQueryCompatible) {
-        query = query.replace(/%3C=/g, "=le=").replace(/%3E=/g, "=ge=").replace(/%3C/g, "=lt=").replace(/%3E/g, "=gt=");
+        query = query.replace(/%3C=/g, '=le=').replace(/%3E=/g, '=ge=').replace(/%3C/g, '=lt=').replace(/%3E/g, '=gt=');
     }
 
-    if (query.indexOf("/") > -1) { // performance guard
+    if (query.indexOf('/') > -1) { // performance guard
         // convert slash delimited text to arrays
         query = query.replace(/[\+\*\$\-:\w%\._]*\/[\+\*\$\-:\w%\._\/]*/g, function (slashed) {
-            return "(" + slashed.replace(/\//g, ",") + ")";
+            return '(' + slashed.replace(/\//g, ',') + ')';
         });
     }
 
     // convert FIQL to normalized call syntax form
     query = query.replace(/(\([\+\*\$\-:\w%\._,]+\)|[\+\*\$\-:\w%\._]*|)([<>!]?=(?:[\w]*=)?|>|<)(\([\+\*\$\-:\w%\._,]+\)|[\+\*\$\-:\w%\._]*|)/g,
-	                     //<---------       property        -----------><------  operator -----><----------------   value ------------------>
-			function (t, property, operator, value) {
-			    if (operator.length < 3) {
-			        if (!that.operatorMap[operator]) {
-			            throw new URIError("Illegal operator " + operator);
-			        }
-			        operator = that.operatorMap[operator];
-			    }
-			    else {
-			        operator = operator.substring(1, operator.length - 1);
-			    }
-			    return operator + '(' + property + "," + value + ")";
-			});
+                         //<---------       property        -----------><------  operator -----><----------------   value ------------------>
+            function (t, property, operator, value) {
+                if (operator.length < 3) {
+                    if (!that.operatorMap[operator]) {
+                        throw new URIError('Illegal operator ' + operator);
+                    }
+                    operator = that.operatorMap[operator];
+                }
+                else {
+                    operator = operator.substring(1, operator.length - 1);
+                }
+                return operator + '(' + property + ',' + value + ')';
+            });
 
-    //STILL TRYING TO QUESTION MARK, EH? I HOP OVER YOUR SILLYNESS
-    if (query.charAt(0) == "?") {
+    // STILL TRYING TO QUESTION MARK, EH? I HOP OVER YOUR SILLYNESS
+    if (query.charAt(0) == '?') {
         query = query.substring(1);
     }
 
-    //get leftover chars from the query
-    //this could be things like more and/ors, or a comma to apply a sort or filter
+    // get leftover chars from the query
+    // this could be things like more and/ors, or a comma to apply a sort or filter
     var leftoverCharacters = query.replace(/(\))|([&\|,])?([\+\*\$\-:\w%\._]*)(\(?)/g,
-	                       //    <-closedParan->|<-delim-- propertyOrValue -----(> |
-		function (t, closedParan, delim, propertyOrValue, openParan) {
-		    if (delim) {
-		        if (delim === "&") {
-		            setConjunction("and");
-		        }
-		        if (delim === "|") {
-		            setConjunction("or");
-		        }
-		    }
-		    if (openParan) {
-		        var newTerm = new RqlQuery();
-		        newTerm.name = propertyOrValue;
-		        newTerm.parent = term;
-		        call(newTerm);
-		    }
-		    else if (closedParan) {
-		        var isArray = !term.name;
-		        term = term.parent;
-		        if (!term) {
-		            throw new URIError("Closing paranthesis without an opening paranthesis");
-		        }
-		        if (isArray) {
-		            term.args.push(term.args.pop().args);
-		        }
-		    }
-		    else if (propertyOrValue || delim === ',') {
-		        term.args.push(that.stringToValue(propertyOrValue, parameters));
+                            //   <-closedParan->|<-delim-- propertyOrValue -----(> |
+        function (t, closedParan, delim, propertyOrValue, openParan) {
+            if (delim) {
+                if (delim === '&') {
+                    setConjunction('and');
+                }
+                if (delim === '|') {
+                    setConjunction('or');
+                }
+            }
+            if (openParan) {
+                var newTerm = new RqlQuery();
+                newTerm.name = propertyOrValue;
+                newTerm.parent = term;
+                call(newTerm);
+            }
+            else if (closedParan) {
+                var isArray = !term.name;
+                term = term.parent;
+                if (!term) {
+                    throw new URIError('Closing paranthesis without an opening paranthesis');
+                }
+                if (isArray) {
+                    term.args.push(term.args.pop().args);
+                }
+            }
+            else if (propertyOrValue || delim === ',') {
+                term.args.push(that.stringToValue(propertyOrValue, parameters));
 
-		        // cache the last seen sort(), select(), values() and limit()
-		        if (that.contains(that.lastSeen, term.name)) {
-		            topTerm.cache[term.name] = term.args;
-		        }
-		        // cache the last seen id equality
-		        if (term.name === 'eq' && term.args[0] === that.primaryKeyName) {
-		            var id = term.args[1];
-		            if (id && !(id instanceof RegExp)) id = id.toString();
-		            topTerm.cache[that.primaryKeyName] = id;
-		        }
-		    }
-		    return "";
-		});
+                // cache the last seen sort(), select(), values() and limit()
+                if (that.contains(that.lastSeen, term.name)) {
+                    topTerm.cache[term.name] = term.args;
+                }
+                // cache the last seen id equality
+                if (term.name === 'eq' && term.args[0] === that.primaryKeyName) {
+                    var id = term.args[1];
+                    if (id && !(id instanceof RegExp)) id = id.toString();
+                    topTerm.cache[that.primaryKeyName] = id;
+                }
+            }
+            return '';
+        });
 
-    //balanced paranthesis check
+    // balanced paranthesis check
     if (term.parent) {
-        throw new URIError("Opening paranthesis without a closing paranthesis");
+        throw new URIError('Opening paranthesis without a closing paranthesis');
     }
 
-    //if we found leftover chars, get angry
+    // if we found leftover chars, get angry
     if (leftoverCharacters) {
         // any extra characters left over from the replace indicates invalid syntax
-        throw new URIError("Illegal character in query string encountered " + leftoverCharacters);
+        throw new URIError('Illegal character in query string encountered ' + leftoverCharacters);
     }
 
-    //worker bee functions
+    // worker bee functions
 
     function call(newTerm) {
         term.args.push(newTerm);
@@ -286,7 +294,7 @@ RqlParser.prototype.parse = function (query, parameters) {
             term.name = operator;
         }
         else if (term.name !== operator) {
-            throw new Error("Can not mix conjunctions within a group, use paranthesis around each set of same conjuctions (& and |)");
+            throw new Error('Can not mix conjunctions within a group, use paranthesis around each set of same conjuctions (& and |)');
         }
     }
     function removeParentProperty(obj) {
@@ -307,8 +315,8 @@ RqlParser.prototype.parse = function (query, parameters) {
     return topTerm;
 };
 
-//contains function
-//TODO can this be replaced by a simple built-in array function, like indexOf?
+// contains function
+// TODO can this be replaced by a simple built-in array function, like indexOf?
 RqlParser.prototype.contains = function (array, item) {
     for (var i = 0, l = array.length; i < l; i++) {
         if (array[i] === item) {
@@ -317,7 +325,7 @@ RqlParser.prototype.contains = function (array, item) {
     }
 };
 
-//parseGently function
+// parseGently function
 // dumps undesirable exceptions to RqlQuery().error
 RqlParser.prototype.parseGently = function () {
     var terms;
@@ -330,19 +338,19 @@ RqlParser.prototype.parseGently = function () {
     return terms;
 };
 
-//stringToValue function
-//converts string representations of things into values of the proper data type
+// stringToValue function
+// converts string representations of things into values of the proper data type
 RqlParser.prototype.stringToValue = function (str, parameters) {
     var converter = this.converters['default'];
-    if (str.charAt(0) === "$") {
+    if (str.charAt(0) === '$') {
         var param_index = parseInt(str.substring(1)) - 1;
         return param_index >= 0 && parameters ? parameters[param_index] : undefined;
     }
-    if (str.indexOf(":") > -1) {
-        var parts = str.split(":", 2);
+    if (str.indexOf(':') > -1) {
+        var parts = str.split(':', 2);
         converter = this.converters[parts[0]];
         if (!converter) {
-            throw new URIError("Unknown converter " + parts[0]);
+            throw new URIError('Unknown converter ' + parts[0]);
         }
         str = parts[1];
     }
@@ -355,23 +363,25 @@ RqlParser.prototype.stringToValue = function (str, parameters) {
 // Encodes a query in a form that can be evaluated easily 
 //---------------------------
 
-//object constructer
+// object constructer
 var RqlQuery = function (name) {
-    this.name = name || "and";
+    this.name = name || 'and';
     this.args = [];
-    this.knownOperators = ["sort", "in", "not", "any", "all", "or", "and", "select", "exclude", "values", "limit", "distinct", "recurse", "aggregate", "between", "sum", "mean", "max", "min", "count", "first", "one", "eq", "ne", "le", "ge", "lt", "gt"];
-    this.knownScalarOperators = ["mean", "sum", "min", "max", "count", "first", "one"];
-    this.arrayMethods = ["forEach", "reduce", "map", "filter", "indexOf", "some", "every"];
+    this.knownOperators = ['sort', 'in', 'not', 'any', 'all', 'or', 'and', 'select', 'exclude', 'values', 'limit',
+        'distinct', 'recurse', 'aggregate', 'between', 'sum', 'mean', 'max', 'min', 'count', 'first', 'one',
+        'eq', 'ne', 'le', 'ge', 'lt', 'gt'];
+    this.knownScalarOperators = ['mean', 'sum', 'min', 'max', 'count', 'first', 'one'];
+    this.arrayMethods = ['forEach', 'reduce', 'map', 'filter', 'indexOf', 'some', 'every'];
     this.parser = new RqlParser();
 };
 
-//when function
-//TODO may need to adopt the promised-io libary.  Would hope not; in our usage everything should be synchronous
+// when function
+// TODO may need to adopt the promised-io libary.  Would hope not; in our usage everything should be synchronous
 RqlQuery.prototype.when = function (value, callback) {
     callback(value);
 };
 
-//serializeArgs function
+// serializeArgs function
 RqlQuery.prototype.serializeArgs = function serializeArgs(array, delimiter) {
     var results = [];
     for (var i = 0, l = array.length; i < l; i++) {
@@ -380,71 +390,71 @@ RqlQuery.prototype.serializeArgs = function serializeArgs(array, delimiter) {
     return results.join(delimiter);
 };
 
-//toString function
+// toString function
 RqlQuery.prototype.toString = function () {
-    return this.name === "and" ?
-		this.serializeArgs(this.args, "&") :
-		this.queryToString(this);
+    return this.name === 'and' ?
+        this.serializeArgs(this.args, '&') :
+        this.queryToString(this);
 };
 
-//queryToString function
+// queryToString function
 RqlQuery.prototype.queryToString = function (part) {
     if (part instanceof Array) {
-        return '(' + this.serializeArgs(part, ",") + ')';
+        return '(' + this.serializeArgs(part, ',') + ')';
     }
     if (part && part.name && part.args) {
         return [
                 part.name,
-                "(",
-                this.serializeArgs(part.args, ","),
-                ")"
-        ].join("");
+                '(',
+                this.serializeArgs(part.args, ','),
+                ')'
+        ].join('');
     }
     return this.encodeValue(part);
 };
 
-//encodeString function
+// encodeString function
 RqlQuery.prototype.encodeString = function (s) {
-    if (typeof s === "string") {
+    if (typeof s === 'string') {
         s = encodeURIComponent(s);
         if (s.match(/[\(\)]/)) {
-            s = s.replace("(", "%28").replace(")", "%29");
+            s = s.replace('(', '%28').replace(')', '%29');
         };
     }
     return s;
 };
 
-//encodeValue function
+// encodeValue function
 RqlQuery.prototype.encodeValue = function (val) {
     var encoded;
     if (val === null) { val = 'null'; }
-    if (val !== this.parser.converters["default"]('' + (val.toISOString && val.toISOString() || val.toString()))) {
+    if (val !== this.parser.converters['default']('' + (val.toISOString && val.toISOString() || val.toString()))) {
         var type = typeof val;
         if (val instanceof RegExp) {
             // TODO: control whether to we want simpler glob() style
             val = val.toString();
             var i = val.lastIndexOf('/');
-            type = val.substring(i).indexOf('i') >= 0 ? "re" : "RE";
+            type = val.substring(i).indexOf('i') >= 0 ? 're' : 'RE';
             val = this.encodeString(val.substring(1, i));
             encoded = true;
         }
-        if (type === "object") {
-            type = "epoch";
+        if (type === 'object') {
+            type = 'epoch';
             val = val.getTime();
             encoded = true;
         }
-        if (type === "string") {
+        if (type === 'string') {
             val = this.encodeString(val);
             encoded = true;
         }
-        val = [type, val].join(":");
+        val = [type, val].join(':');
     }
-    if (!encoded && typeof val === "string") { val = this.encodeString(val); }
+    if (!encoded && typeof val === 'string') { val = this.encodeString(val); }
     return val;
 };
 
-//updateQueryMethods function
-//sets up functions on the RqlQuery object to execute various query-string operators & methods
+// updateQueryMethods function
+// sets up functions on the RqlQuery object to execute various query-string operators & methods
 RqlQuery.prototype.updateQueryMethods = function () {
     var that = this;
     this.knownOperators.forEach(function (name) {
@@ -477,7 +487,7 @@ RqlQuery.prototype.updateQueryMethods = function () {
     });
 };
 
-//walk function
+// walk function
 // recursively iterate over query terms calling 'fn' for each term
 RqlQuery.prototype.walk = function (fn, options) {
     options = options || {};
@@ -502,14 +512,14 @@ RqlQuery.prototype.walk = function (fn, options) {
     walk.call(this, this.name, this.args);
 };
 
-//push function
+// push function
 // append a new term
 RqlQuery.prototype.push = function (term) {
     this.args.push(term);
     return this;
 };
 
-//normalize function
+// normalize function
 /* disambiguate query */
 RqlQuery.prototype.normalize = function (options) {
     options = options || {};
@@ -581,27 +591,27 @@ RqlQuery.prototype.normalize = function (options) {
 // javascript that can be applied on an array of data
 //---------------------------
 
-//object constructer
+// object constructer
 var RqlArray = function () {
     var that = this;
 
-    //this.parseQuery = new RqlParser();
+    // this.parseQuery = new RqlParser();
     this.nextId = 1;
     this.jsOperatorMap = {
-        "eq": "===",
-        "ne": "!==",
-        "le": "<=",
-        "ge": ">=",
-        "lt": "<",
-        "gt": ">"
+        eq: '===',
+        ne: '!==',
+        le: '<=',
+        ge: '>=',
+        lt: '<',
+        gt: '>'
     };
 
-    //big set of operator functions
-    //inside all operator functions, 'this' refers to the array of data that has been passed in to RqlArray.executeQuery
+    // big set of operator functions
+    // inside all operator functions, 'this' refers to the array of data that has been passed in to RqlArray.executeQuery
     this.operators = {
-        //will sort an array based on a property value. a leading plus or minus will dictate the direction of the sort
+        // will sort an array based on a property value. a leading plus or minus will dictate the direction of the sort
         // e.g. sort(+lastName)
-        //can be applied after a filter
+        // can be applied after a filter
         // e.g. lt(age,40),sort(-age)
         sort: function () {
             var terms = [];
@@ -609,15 +619,15 @@ var RqlArray = function () {
                 var sortAttribute = arguments[i];
                 var firstChar = sortAttribute.charAt(0);
                 var term = { attribute: sortAttribute, ascending: true };
-                if (firstChar == "-" || firstChar == "+") {
-                    if (firstChar == "-") {
+                if (firstChar == '-' || firstChar == '+') {
+                    if (firstChar == '-') {
                         term.ascending = false;
                     }
                     term.attribute = term.attribute.substring(1);
                 }
                 terms.push(term);
             }
-            //sort the array of data
+            // sort the array of data
             this.sort(function (a, b) {
                 for (var term, i = 0; term = terms[i]; i++) {
                     if (a[term.attribute] != b[term.attribute]) {
@@ -628,36 +638,41 @@ var RqlArray = function () {
             });
             return this;
         },
-        //will return true if a property value matches a regex pattern with case insensitivity
+
+        // will return true if a property value matches a regex pattern with case insensitivity
         // e.g. match(firstName,bi)
         match: that.filter(function (value, regex) {            
             return new RegExp(regex, 'i').test(value);
         }),
-        //will return true if a property value matches a regex pattern with case sensitivity
+
+        // will return true if a property value matches a regex pattern with case sensitivity
         // e.g. matchcase(firstName,Bi)
         matchcase: that.filter(function (value, regex) {
             return new RegExp(regex).test(value);
         }),
-        //will return true if a property has a value matching any value in the second parameter (which is an array of values).
-        //essentially a shortcut for a string of equality checks separated by ORs
+
+        // will return true if a property has a value matching any value in the second parameter (which is an array of values).
+        // essentially a shortcut for a string of equality checks separated by ORs
         // e.g. in(firstName,(John,Johnny,Jon))
-        "in": that.filter(function (value, values) {
+        'in': that.filter(function (value, values) {
             return that.contains(values, value);
         }),
-        //will return true if a property has a value not matching any value in the second parameter (which is an array of values).
-        //essentially a shortcut for a string of equality checks separated by ORs, then negated
+
+        // will return true if a property has a value not matching any value in the second parameter (which is an array of values).
+        // essentially a shortcut for a string of equality checks separated by ORs, then negated
         // e.g. out(firstName,(Jimbo,Danbo,Hankbo))
         out: that.filter(function (value, values) {
             return !that.contains(values, value);
         }),
-        //used for inspecting array properties, will return true if array has a value in it
+
+        // used for inspecting array properties, will return true if array has a value in it
         // e.g. contains(colours,blue)
-        //where colours is an array property of the data objects e.g. [{colours:['green', 'red']},{colours:['green', 'blue']}]
-        //the value can also be a function that applies a filter to elements of the array.
+        // where colours is an array property of the data objects e.g. [{colours:['green', 'red']},{colours:['green', 'blue']}]
+        // the value can also be a function that applies a filter to elements of the array.
         // e.g. contains(paints,eq(colour,blue))
-        //where the source data could be [{paints:[{size:1, colour:'blue'}, {size:8, colour:'green'}]}, {paints:[{size:3, colour:'red'}]}]
+        // where the source data could be [{paints:[{size:1, colour:'blue'}, {size:8, colour:'green'}]}, {paints:[{size:3, colour:'red'}]}]
         contains: that.filter(function (array, value) {
-            if (typeof value == "function") {
+            if (typeof value == 'function') {
                 return array instanceof Array && that.each(array, function (v) {
                     return value.call([v]).length;
                 });
@@ -666,11 +681,12 @@ var RqlArray = function () {
                 return array instanceof Array && that.contains(array, value);
             }
         }),
-        //used for inspecting array properties, will return true if array does not have a value in it
+
+        // used for inspecting array properties, will return true if array does not have a value in it
         // e.g. excludes(colours,blue)
-        //where colours is an array property of the data objects e.g. [{colours:['green', 'red']}, {colours:['green', 'blue']}]
+        // where colours is an array property of the data objects e.g. [{colours:['green', 'red']}, {colours:['green', 'blue']}]
         excludes: that.filter(function (array, value) {
-            if (typeof value == "function") {
+            if (typeof value == 'function') {
                 return !that.each(array, function (v) {
                     return value.call([v]).length;
                 });
@@ -679,16 +695,15 @@ var RqlArray = function () {
                 return !that.contains(array, value);
             }
         }),
-        //will apply OR logic to any number of conditions
-        //e.g. or(eq(firstName,John),eq(firstName,Johnny),eq(firstName,Jon))
-        or: function () {
 
-           
+        // will apply OR logic to any number of conditions
+        // e.g. or(eq(firstName,John),eq(firstName,Johnny),eq(firstName,Jon))
+        or: function () {
             var items = [];
-            var idProperty = "__rqlId" + that.nextId++;
+            var idProperty = '__rqlId' + that.nextId++;
             try {
                 for (var i = 0; i < arguments.length; i++) {
-                    //apply each 'or' test against the data
+                    // apply each 'or' test against the data
                     var group = arguments[i].call(this);
                     for (var j = 0, l = group.length; j < l; j++) {
                         var item = group[j];
@@ -701,16 +716,15 @@ var RqlArray = function () {
                 }
             } finally {
                 // cleanup markers
-                //TODO figure out what this code is doing?
+                // TODO figure out what this code is doing?
                 for (var i = 0, l = items.length; i < l; i++) {
-                    //JR - orig version did not target the index.  confirmed problem existed in original dojo version 
-                    //delete items[idProperty];
+                    // JR - orig version did not target the index.  confirmed problem existed in original dojo version 
+                    // delete items[idProperty];
                     delete items[i][idProperty];
                 }
             }
             return items;
-            
-            
+
             //alternate version taken from http://rql-engine.eu01.aws.af.cm/
             /*
               var items = [];
@@ -722,19 +736,21 @@ var RqlArray = function () {
             */
             
         },
-        //will apply AND logic to any number of conditions
-        //e.g. and(lt(age,50),eq(firstName,Jake),eq(lastName,Chambers))
+
+        // will apply AND logic to any number of conditions
+        // e.g. and(lt(age,50),eq(firstName,Jake),eq(lastName,Chambers))
         and: function () {
-            var items = this; //the array of data
+            var items = this; // the array of data
             // TODO: use condition property
             for (var i = 0; i < arguments.length; i++) {
                 items = arguments[i].call(items);
             }
             return items;
         },
-        //will return objects with only the given properties
-        //e.g. select(firstName,lastName)
-        //when applied on an array of "person" objects with many properties, will return array of objects with only firstName and lastName properties
+
+        // will return objects with only the given properties
+        // e.g. select(firstName,lastName)
+        // when applied on an array of 'person' objects with many properties, will return array of objects with only firstName and lastName properties
         select: function () {
             var args = arguments;
             var argc = arguments.length;
@@ -743,16 +759,17 @@ var RqlArray = function () {
                 for (var i = 0; i < argc; i++) {
                     var propertyName = args[i];
                     var value = that.evaluateProperty(object, propertyName);
-                    if (typeof value != "undefined") {
+                    if (typeof value != 'undefined') {
                         selected[propertyName] = value;
                     }
                 }
                 emit(selected);
             });
         },
-        //will return objects with the given properties removed
-        //e.g. unselect(firstName,lastName)
-        //when applied on an array of "person" objects with many properties, will return array of objects with firstName and lastName properties removed
+
+        // will return objects with the given properties removed
+        // e.g. unselect(firstName,lastName)
+        // when applied on an array of 'person' objects with many properties, will return array of objects with firstName and lastName properties removed
         unselect: function () {
             var args = arguments;
             var argc = arguments.length;
@@ -767,7 +784,8 @@ var RqlArray = function () {
                 emit(selected);
             });
         },
-        //will return an array of values for a given property.  if multiple properties are given, will return arrays of values for each data item
+
+        // will return an array of values for a given property.  if multiple properties are given, will return arrays of values for each data item
         // e.g. values(firstName)
         // could return ['Roland','Susannah','Eddie']
         // e.g. values(firstName,lastName)
@@ -795,8 +813,9 @@ var RqlArray = function () {
                 emit(selected);
             });
         },
-        //will return a subsection of the data array.  first parameter is number of items to return. second parameter is index to start taking at.
-        //unclear what third parameter 'maxCount' does. it adds extra properties to the result, but nothing seems to use them
+
+        // will return a subsection of the data array.  first parameter is number of items to return. second parameter is index to start taking at.
+        // unclear what third parameter 'maxCount' does. it adds extra properties to the result, but nothing seems to use them
         // e.g. limit(10,4)
         // will return array obects 5 through 14
         limit: function (limit, start, maxCount) {
@@ -806,22 +825,23 @@ var RqlArray = function () {
             if (maxCount) {
                 sliced.start = start;
                 sliced.end = start + sliced.length - 1;
-                sliced.totalCount = Math.min(totalCount, typeof maxCount === "number" ? maxCount : Infinity);
+                sliced.totalCount = Math.min(totalCount, typeof maxCount === 'number' ? maxCount : Infinity);
             }
             return sliced;
         },
-        //returns the array of values with any duplicates removed
-        //does not appear to work on complex objects
+
+        // returns the array of values with any duplicates removed
+        // does not appear to work on complex objects
         // e.g. distinct()
-        //can come after a filter
+        // can come after a filter
         // e.g. values(lastName),distinct()
         distinct: function () {
             var primitives = {};
             var needCleaning = [];
             var newResults = this.filter(function (value) {
-                if (value && typeof value == "object") {
+                if (value && typeof value == 'object') {
                     if (!value.__found__) {
-                        value.__found__ = function () { };// get ignored by JSON serialization
+                        value.__found__ = function () { }; // get ignored by JSON serialization
                         needCleaning.push(value);
                         return true;
                     }
@@ -836,16 +856,17 @@ var RqlArray = function () {
                 delete object.__found__;
             });
             return newResults;
-        },        
-        //flattens out nested arrays
+        },
+
+        // flattens out nested arrays
         // e.g. input [[1,2,3],[[4,5],[6,7]]]   will return  [1,2,3,4,5,6,7]
-        //will also extract and flatten any arrays that are found under the given property
-        // e.g. input  [{"name":"Roland", "orders":[{"id": 25}, {"id":40}]}, {"name":"Jake", "orders":[{"id": 19}]}] 
-        //      query  recurse(orders)    
-        //      result [{"name":"Roland", "orders":[{"id": 25}, {"id":40}]}, {"id": 25}, {"id":40}, {"name":"Jake", "orders":[{"id": 19}]}, {"id": 19}]   
+        // will also extract and flatten any arrays that are found under the given property
+        // e.g. input  [{"name":"Roland", "orders":[{"id": 25}, {"id":40}]}, {"name":"Jake", "orders":[{"id": 19}]}]
+        //      query  recurse(orders)
+        //      result [{"name":"Roland", "orders":[{"id": 25}, {"id":40}]}, {"id": 25}, {"id":40}, {"name":"Jake", "orders":[{"id": 19}]}, {"id": 19}]
         recurse: function (property) {
             // TODO: this needs to use lazy-array
-            var newResults = [];          
+            var newResults = [];
             function recurse(value) {
                 if (value instanceof Array) {
                     that.each(value, recurse);
@@ -853,12 +874,12 @@ var RqlArray = function () {
                     newResults.push(value);
                     if (property) {
                         value = value[property];
-                        if (value && typeof value == "object") {
+                        if (value && typeof value == 'object') {
                             recurse(value);
                         }
                     } else {
                         for (var i in value) {
-                            if (value[i] && typeof value[i] == "object") {
+                            if (value[i] && typeof value[i] == 'object') {
                                 recurse(value[i]);
                             }
                         }
@@ -868,24 +889,25 @@ var RqlArray = function () {
             recurse(this);
             return newResults;
         },
-        //returns aggregations on the array.
-        //parameters are list of values to group by, and list of functions to aggregate over the data.
-        //functions should be appropriate.  i.e. they are applied against an array and return a scalar.
-        //good functions: sum, count, first, max, min, mean 
+
+        // returns aggregations on the array.
+        // parameters are list of values to group by, and list of functions to aggregate over the data.
+        // functions should be appropriate.  i.e. they are applied against an array and return a scalar.
+        // good functions: sum, count, first, max, min, mean 
         // e.g. aggregate(age,mean(salary))
         // e.g. aggregate(age,gender,mean(salary),count())
-        //aggregation results are stored in numerically named properties in order of how they are defined in the function.
+        // aggregation results are stored in numerically named properties in order of how they are defined in the function.
         // e.g. aggregate(age,mean(salary),count())
         //   could return something like [{"age":20, "0":53216, "1":13},{"age":21, "0":55898, "1":11},...]
-        //can come after a filter
+        // can come after a filter
         // e.g. lt(age,50),aggregate(age,mean(salary))
         aggregate: function () {
             var distinctives = [];
             var aggregates = [];
-            //figure out the parameters. functions are for aggregatin'. values are for grouping
+            // figure out the parameters. functions are for aggregatin'. values are for grouping
             for (var i = 0; i < arguments.length; i++) {
                 var arg = arguments[i];
-                if (typeof arg === "function") {
+                if (typeof arg === 'function') {
                     aggregates.push(arg);
                 } else {
                     distinctives.push(arg);
@@ -893,9 +915,9 @@ var RqlArray = function () {
             }
             var distinctObjects = {};
             var dl = distinctives.length;
-            //go through all array objects and group thing together based on values of grouping properties
+            // go through all array objects and group thing together based on values of grouping properties
             that.each(this, function (object) {
-                var key = "";
+                var key = '';
                 for (var i = 0; i < dl; i++) {
                     key += '/' + object[distinctives[i]];
                 }
@@ -907,8 +929,8 @@ var RqlArray = function () {
             });
             var al = aggregates.length;
             var newResults = [];
-            //call the aggregation functions on each unique grouping.
-            //put all the function results (and grouping values) into result objects
+            // call the aggregation functions on each unique grouping.
+            // put all the function results (and grouping values) into result objects
             for (var key in distinctObjects) {
                 var arrayForKey = distinctObjects[key];
                 var newObject = {};
@@ -924,85 +946,93 @@ var RqlArray = function () {
             }
             return newResults;
         },
-        //returns elements that are between a range. range can be of different types (though object type gets a little wonky)
+
+        // returns elements that are between a range. range can be of different types (though object type gets a little wonky)
         // e.g. between(age,(20,30))
         // e.g. between(lastName,(Ma,Mo))
         // e.g. between(,(100,200))   <-- works for array of values e.g. [100,200,300,400]
         between: that.filter(function (value, range) {
             return value >= range[0] && value < range[1];
-        }),        
-        //returns the sum of the value in the array, or in a property of the array
-        //value used must be numeric
+        }),
+
+        // returns the sum of the value in the array, or in a property of the array
+        // value used must be numeric
         // e.g. sum()    <-- only works for array of numerics e.g. [1,2,3,4]
         // e.g. sum(age)
-        //can come after a filter
+        // can come after a filter
         // e.g. gt(age,20),sum(age)
         sum: that.reducer(function (a, b) {
-            //adds up array using reducer, which applies a+b along each array element
+            // adds up array using reducer, which applies a+b along each array element
             return a + b;
         }),
-        //returns the mean average value in the array, or in a property of the array
-        //value used must be numeric
+
+        // returns the mean average value in the array, or in a property of the array
+        // value used must be numeric
         // e.g. mean()    <-- only works for array of numerics e.g. [1,2,3,4]
         // e.g. mean(age)
-        //can come after a filter
+        // can come after a filter
         // e.g. gt(age,20),mean(age)
         mean: function (property) {
             return that.operators.sum.call(this, property) / this.length;
         },
-        //returns the maximum value in the array, or in a property of the array
-        //value used must be numeric
+
+        // returns the maximum value in the array, or in a property of the array
+        // value used must be numeric
         // e.g. max()    <-- only works for array of numerics e.g. [1,2,3,4]
         // e.g. max(age)
-        //can come after a filter
+        // can come after a filter
         // e.g. lt(age,65),max(age)
         max: that.reducer(function (a, b) {
             return Math.max(a, b);
         }),
-        //returns the minimum value in the array, or in a property of the array
-        //value used must be numeric
+
+        // returns the minimum value in the array, or in a property of the array
+        // value used must be numeric
         // e.g. min()    <-- only works for array of numerics e.g. [1,2,3,4]
         // e.g. min(age)
-        //can come after a filter
+        // can come after a filter
         // e.g. gt(age,20),min(age)
         min: that.reducer(function (a, b) {
             return Math.min(a, b);
         }),
-        //returns the number of elements in the data array
-        //important to note the result is not contained in an array.
+
+        // returns the number of elements in the data array
+        // important to note the result is not contained in an array.
         // e.g. count()
-        // e.g. input ["hello", "goodbye"] , result will be 2, not [2]      
-        //can come after a filter
-        // e.g. eq(lastName,Dean),count()  
+        // e.g. input ["hello", "goodbye"] , result will be 2, not [2]
+        // can come after a filter
+        // e.g. eq(lastName,Dean),count()
         count: function () {
             return this.length;
         },
-        //returns the first element of the data array
-        //important to note the result is not contained in an array.
+
+        // returns the first element of the data array
+        // important to note the result is not contained in an array.
         // e.g. first()
-        // e.g. input ["hello", "goodbye"] , result will be "hello", not ["hello"]      
-        //can come after a filter
-        // e.g. values(lastName),first()  
+        // e.g. input ["hello", "goodbye"] , result will be "hello", not ["hello"]
+        // can come after a filter
+        // e.g. values(lastName),first()
         first: function () {
             return this[0];
         },
-        //returns the only element of the data array, or an error if more than one
-        //important to note the result is not contained in an array.
+
+        // returns the only element of the data array, or an error if more than one
+        // important to note the result is not contained in an array.
         // e.g. one()
-        // e.g. input ["hello"] , result will be "hello", not ["hello"]      
-        //can come after a filter
-        // e.g. values(lastName),one()  
+        // e.g. input ["hello"] , result will be "hello", not ["hello"]
+        // can come after a filter
+        // e.g. values(lastName),one()
         one: function () {
             if (this.length > 1) {
-                throw new TypeError("More than one object found");
+                throw new TypeError('More than one object found');
             }
             return this[0];
         }
     };
 };
 
-//each function
-//applies callback on all items of an array.  callback functions pass results back using an emit function
+// each function
+// applies callback on all items of an array.  callback functions pass results back using an emit function
 RqlArray.prototype.each = function (array, callback) {
     var emit, result;
     if (callback.length > 1) {
@@ -1020,7 +1050,7 @@ RqlArray.prototype.each = function (array, callback) {
     return result;
 };
 
-//contains function
+// contains function
 RqlArray.prototype.contains = function (array, item) {
     for (var i = 0, l = array.length; i < l; i++) {
         if (array[i] === item) {
@@ -1029,10 +1059,10 @@ RqlArray.prototype.contains = function (array, item) {
     }
 };
 
-//stringify	 function
-//use JSON object function if it is defined.  else use custom function
-RqlArray.prototype.stringify = typeof JSON !== "undefined" && JSON.stringify || function (str) {
-    return '"' + str.replace(/"/g, "\\\"") + '"';
+// stringify	 function
+// use JSON object function if it is defined.  else use custom function
+RqlArray.prototype.stringify = typeof JSON !== 'undefined' && JSON.stringify || function (str) {
+    return '"' + str.replace(/"/g, '\\\"') + '"';
 };
 
 //filter function
@@ -1045,7 +1075,7 @@ RqlArray.prototype.filter = function (condition, not) {
     var that = this;
     // convert to boolean right now
     var filter = function (property, second) {
-        if (typeof second == "undefined") {
+        if (typeof second == 'undefined') {
             second = property;
             property = undefined;
         }
@@ -1059,27 +1089,27 @@ RqlArray.prototype.filter = function (condition, not) {
         }
         return filtered;
     };
-    //crazy trickery here. mash in the condition function as a property to the filter function, and filter will use it when it runs.
+    // crazy trickery here. mash in the condition function as a property to the filter function, and filter will use it when it runs.
     filter.condition = condition;
     return filter;
 };
 
-//reducer function
-//applies a function to an array that crawls over each element of the array and ends up producing a single value
-//e.g. summing up numbers
+// reducer function
+// applies a function to an array that crawls over each element of the array and ends up producing a single value
+// e.g. summing up numbers
 //    may need to trick in the data as the prototype will mess up 'this'
 //    nope. same reason as above
 RqlArray.prototype.reducer = function (func) {
     return function (property) {
         var result = this[0];
         if (property) {
-            //apply the reducer function along the array, using the value of the given property
+            // apply the reducer function along the array, using the value of the given property
             result = result && result[property];
             for (var i = 1, l = this.length; i < l; i++) {
                 result = func(result, this[i][property]);
             }
         } else {
-            //apply the reducer function along the array, using the value in the array
+            // apply the reducer function along the array, using the value in the array
             for (var i = 1, l = this.length; i < l; i++) {
                 result = func(result, this[i]);
             }
@@ -1088,58 +1118,58 @@ RqlArray.prototype.reducer = function (func) {
     }
 };
 
-//evaluateProperty function
+// evaluateProperty function
 RqlArray.prototype.evaluateProperty = function (object, property) {
     if (property instanceof Array) {
         this.each(property, function (part) {
             object = object[decodeURIComponent(part)];
         });
         return object;
-    } else if (typeof property == "undefined") {
+    } else if (typeof property == 'undefined') {
         return object;
     } else {
         return object[decodeURIComponent(property)];
     }
 };
 
-//missingOperator function
+// missingOperator function
 RqlArray.prototype.missingOperator = function (operator) {
-    throw new Error("Operator " + operator + " is not defined");
+    throw new Error('Operator ' + operator + ' is not defined');
 };
 
-//it appears this is never used. would explain why there are variables that are not defined (e.g. 'term')
+// it appears this is never used. would explain why there are variables that are not defined (e.g. 'term')
 /*
 RqlArray.prototype.conditionEvaluator = function(condition){
-	var jsOperator = this.jsOperatorMap[term.name];
-	if(jsOperator){
-		js += "(function(item){return item." + term[0] + jsOperator + "parameters[" + (index -1) + "][1];});";
-	}
-	else{
-		js += "operators['" + term.name + "']";
-	}
-	return eval(js);
+    var jsOperator = this.jsOperatorMap[term.name];
+    if(jsOperator){
+        js += "(function(item){return item." + term[0] + jsOperator + "parameters[" + (index -1) + "][1];});";
+    }
+    else{
+        js += "operators['" + term.name + "']";
+    }
+    return eval(js);
 };
 */
 
-//executeQuery function
-//the main grinder to execute a query against a json array
-//query = the query string
-//options = option object
+// executeQuery function
+// the main grinder to execute a query against a json array
+// query = the query string
+// options = option object
 //          .operators - an object containing additional operators that can be used by the query engine
 //          .parameters - an array of values to be mapped against $# placeholders.
 //                        e.g. ['abc'] would insert 'abc' wherever $1 is written in the query
-//target = the array to run the query against
-//returns: array of elements that satisfied the query
+// target = the array to run the query against
+// returns: array of elements that satisfied the query
 RqlArray.prototype.executeQuery = function (query, options, target) {
     options = options || {};
 
     var that = this;
 
-    //parse the query string
+    // parse the query string
     var parser = new RqlParser();
     query = parser.parse(query, options.parameters);
 
-    //generate a class T that has all the operators
+    // generate a class T that has all the operators
     function T() { }
     T.prototype = this.operators;
     var operators = new T;
@@ -1147,96 +1177,106 @@ RqlArray.prototype.executeQuery = function (query, options, target) {
     for (var i in options.operators) {
         operators[i] = options.operators[i];
     }
-    //crafty function to call operators.
-    //will be called by javascript constructed in a string and run via eval
+
+    // crafty function to call operators.
+    // will be called by javascript constructed in a string and run via eval
     function op(name) {
         return operators[name] || that.missingOperator(name);
         /*
-		if (operators[name]) {
-			operators[name].targetData = target;
-			return operators[name];
-		} else {
-			return that.missingOperator(name);
-		}
-		*/
+        if (operators[name]) {
+            operators[name].targetData = target;
+            return operators[name];
+        } else {
+            return that.missingOperator(name);
+        }
+        */
     }
-    //var parameters = options.parameters || [];
-    //var js = "";
+    // var parameters = options.parameters || [];
+    // var js = "";
 
-    //this converts the query into a javascript function (in string form) that will execute the query against the array
-    //value = the query (after parsing)
+    // this converts the query into a javascript function (in string form) that will execute the query against the array
+    // value = the query (after parsing)
     function queryToJS(value) {
-        if (value && typeof value === "object") {
-            //query is a query object
+        if (value && typeof value === 'object') {
+            // query is a query object
 
             if (value instanceof Array) {
-                //call recursively on all elements of the array
+                // call recursively on all elements of the array
                 return '[' + that.each(value, function (value, emit) {
                     emit(queryToJS(value));
                 }) + ']';
             } else {
                 var jsOperator = that.jsOperatorMap[value.name];
                 if (jsOperator) {
-                    //it's a basic boolean operator (equals / greater / less / etc)
-                    //build a path to the javascript property we want to test, testing for each part as we go
+                    // it's a basic boolean operator (equals / greater / less / etc)
+                    // build a path to the javascript property we want to test, testing for each part as we go
                     // item['foo.bar'] ==> (item && item.foo && item.foo.bar && ...)
                     var path = value.args[0];
                     var target = value.args[1];
                     var item;
-                    if (typeof target == "undefined") {
-                        item = "item";
+                    if (typeof target == 'undefined') {
+                        item = 'item';
                         target = path;
                     } else if (path instanceof Array) {
-                        item = "item";
+                        item = 'item';
                         var escaped = [];
                         for (var i = 0; i < path.length; i++) {
                             escaped.push(that.stringify(path[i]));
-                            item += "&&item[" + escaped.join("][") + ']';
+                            item += '&&item[' + escaped.join('][') + ']';
                         }
                     } else {
-                        item = "item&&item[" + that.stringify(path) + "]";
+                        item = 'item&&item[' + that.stringify(path) + ']';
                     }
 
-                    //make the condition, <path to value> <operator> <target>
+                    // make the condition, <path to value> <operator> <target>
                     // e.g. item && item["foo"] === "bar"
                     var condition = item + jsOperator + queryToJS(target);
 
-                    //apply the condition against items in the array, using a filter to weed out those that fail it.  'this' is the array
+                    // apply the condition against items in the array, using a filter to weed out those that fail it.  'this' is the array
                     // use native Array.prototype.filter if available
                     if (typeof Array.prototype.filter === 'function') {
-                        return "(function(){return this.filter(function(item){return " + condition + "})})";
-                        //???return "this.filter(function(item){return " + condition + "})";
+                        return '(function(){return this.filter(function(item){return ' + condition + '})})';
+                        // ???return 'this.filter(function(item){return ' + condition + '})';
                     } else {
-                        return "(function(){var filtered = []; for(var i = 0, length = this.length; i < length; i++){var item = this[i];if(" + condition + "){filtered.push(item);}} return filtered;})";
+                        return '(function(){var filtered = []; for(var i = 0, length = this.length; i < length; i++){var item = this[i];if(' + condition + '){filtered.push(item);}} return filtered;})';
                     }
                 } else {
-                    //date case
+                    // date case
                     if (value instanceof Date) {
                         return value.valueOf();
                     }
-                    //otherwise its a fancy operator function (see RqlArray.operators above)
-                    //apply the operator using the op function (declared above)
-                    return "(function(){return op('" + value.name + "').call(this" +
-						(value && value.args && value.args.length > 0 ? (", " + that.each(value.args, function (value, emit) {
-						    emit(queryToJS(value));
-						}).join(",")) : "") +
-						")})";
+                    // otherwise its a fancy operator function (see RqlArray.operators above)
+                    // apply the operator using the op function (declared above)
+                    return `(function(){return op('` + value.name + `').call(this` +
+                        (value && value.args && value.args.length > 0 ? (', ' + that.each(value.args, function (value, emit) {
+                            emit(queryToJS(value));
+                        }).join(',')) : '') +
+                        ')})';
                 }
             }
         } else {
-            //query is not an object. return the value
-            return typeof value === "string" ? that.stringify(value) : value;
+            // query is not an object. return the value
+            return typeof value === 'string' ? that.stringify(value) : value;
         }
     }
-    //generate the query function in string form, then turn it into a real function using eval
-    var evaluator = eval("(1&&function(target){return " + queryToJS(query) + ".call(target);})");
-    //apply the query function & return results
+    // generate the query function in string form, then turn it into a real function using eval
+    var evaluator = eval('(1&&function(target){return ' + queryToJS(query) + '.call(target);})');
+    // apply the query function & return results
     return target ? evaluator(target) : evaluator;
 };
 
-function arrayQuery (data, queryString) {
+/**
+ * Search an array of objects for matches against an RQL query string.
+ * See https://github.com/james-rae/rql-nodojo/blob/master/README.md for usage docs
+ *
+ * @param {Array} data an array of objects
+ * @param {String} rqlQuery an RQL query that ideally is relevant to the data array
+ * @param {Object} [options] an optional object of options
+ * @return {Array} the result of the query
+ */
+function arrayQuery (data, rqlQuery, options = {}) {
     const ra = new RqlArray();
-    return ra.executeQuery(queryString, {}, data);
+    return ra.executeQuery(rqlQuery, options, data);
 }
 
 module.exports = () => ({
