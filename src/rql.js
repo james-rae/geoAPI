@@ -1,5 +1,7 @@
 'use strict';
 
+const sqlParser = require('js-sql-parser');
+
 /*
 Right, what's all this then?
 
@@ -1265,11 +1267,62 @@ RqlArray.prototype.executeQuery = function (query, options, target) {
     return target ? evaluator(target) : evaluator;
 };
 
+// ------- end of rql library code block -------
+
+function sqlNodeToRql (node) {
+
+    // TODO figure out date fields
+
+    const typeReactor = {
+        AndExpression: n => { return ''; },
+        OrExpression: n => { return ''; },
+        NotExpression: n => { return ''; },
+        InExpressionListPredicate: n => { return ''; },
+        ComparisonBooleanPrimary: n => { return ''; },
+        Identifier: n => {
+            // field name with nothing fancy
+            return n.value;
+        },
+        Number: n => {
+            // number in string form
+            return n.value;
+        },
+        String: n => {
+            // strip off encasing quotes. probably a better way to do this
+            let s = n.value;
+            if (s.startsWith(`'`) || s.startsWith('"')) {
+                s = s.substring(1, s.length - 1);
+            } else if (s.startsWith('\"')) {
+                s = s.substring(2, s.length - 2);
+            }
+            return s;
+        },
+        Boolean: n => {
+            // node values are in all caps
+            return n.value.toLowerCase();
+        },
+        ExpressionList: n => { return ''; },
+        SimpleExprParentheses: n => { return ''; }
+    }
+
+    if (!typeReactor[node.type]) {
+        console.error('Encountered unsupported query in filter. Unhandled type: ' + node.type);
+        return ''; // TODO determine if we should throw a hard error
+    } else {
+        return typeReactor[node.type](node);
+    }
+}
+
+function sqlToRql (sqlWhere) {
+    const fakeSQL = 'SELECT muffins FROM pod WHERE ' + sqlWhere;
+    const queryTree = sqlParser.parse(fakeSQL);
+}
+
 /**
- * Search an array of objects for matches against an RQL query string.
+ * Search an array for matches against an RQL query string.
  * See https://github.com/james-rae/rql-nodojo/blob/master/README.md for usage docs
  *
- * @param {Array} data an array of objects
+ * @param {Array} data an array
  * @param {String} rqlQuery an RQL query that ideally is relevant to the data array
  * @param {Object} [options] an optional object of options
  * @return {Array} the result of the query
