@@ -1269,7 +1269,9 @@ RqlArray.prototype.executeQuery = function (query, options, target) {
 
 // ------- end of rql library code block -------
 
-function sqlNodeToRql (node) {
+function sqlNodeToJql (node, attQualifier = "a.") {
+
+    // TODO we could embed this inside sqlToJql, and make attQualifier scoped
 
     // TODO figure out date fields
 
@@ -1278,22 +1280,51 @@ function sqlNodeToRql (node) {
         OrExpression: n => { return ''; },
         NotExpression: n => { return ''; },
         InExpressionListPredicate: n => { return ''; },
-        ComparisonBooleanPrimary: n => { return ''; },
+        ComparisonBooleanPrimary: n => {
+            // for now be lazy and use operator raw.
+            // can enhance later to be more robust.
+            // e.g.
+            // TODO check for unsupported operators
+            // TODO wrap lefts and rights in brackets
+
+            const operatorMap = {
+                '=': '===',
+                '==': '===',
+                '===': '===',
+                '>': '>',
+                '>=': '>=',
+                '<': '<',
+                '<=': '<=',
+                '!=': '!==',
+                '!==': '!=='
+            };
+
+            const jqlOp = operatorMap[n.operator];
+            if (!jqlOp) {
+                console.error('Encountered unsupported operator in filter. Unhandled operator: ' + n.operator);
+                // TODO consider doing hard error
+                return "(true)";
+            }
+
+            return `(${sqlNodeToJql(n.left, attQualifier)} ${jqlOp} ${sqlNodeToJql(n.right, attQualifier)})`;
+        },
         Identifier: n => {
-            // field name with nothing fancy
-            return n.value;
+            // tack the object containing the attributes to the attribute name
+            return attQualifier + n.value;
         },
         Number: n => {
             // number in string form
             return n.value;
         },
         String: n => {
-            // strip off encasing quotes. probably a better way to do this
+            // if enclosed in doublequotes or escaped double quotes, change to single quotes
+            // TODO check if escaped double quote actually exists or was just part of that debug form
+            // TODO is is possible for the library to pass in a value that is not wrapped in quotes?
             let s = n.value;
-            if (s.startsWith(`'`) || s.startsWith('"')) {
-                s = s.substring(1, s.length - 1);
+            if (s.startsWith('"')) {
+                s = `'${s.substring(1, s.length - 1)}'`;
             } else if (s.startsWith('\"')) {
-                s = s.substring(2, s.length - 2);
+                s = `'${s.substring(2, s.length - 2)}'`;
             }
             return s;
         },
@@ -1313,9 +1344,26 @@ function sqlNodeToRql (node) {
     }
 }
 
-function sqlToRql (sqlWhere) {
+function sqlToJql (sqlWhere, attribAsProperty = false) {
+    // attribAsProperty means where the attribute lives in relation to the array
+    // {att} is a standard key-value object of attributes
+    // [ {att} , {att}] would be the false case.  this is the format of attributes from the geoApi attribute loader
+    // [ {attributes:{att}}, {attributes:{att}}] would be the true case. this is the format of attributes sitting in the graphics array of a filebased layer
+
+    const attQualifier = attribAsProperty ? 'a.attributes.' : 'a.';
     const fakeSQL = 'SELECT muffins FROM pod WHERE ' + sqlWhere;
     const queryTree = sqlParser.parse(fakeSQL);
+    return sqlNodeToJql(queryTree.value.where, attQualifier);
+}
+
+function jqlArrayQuery (data, sqlWhere) {
+    // TODO add in attribAsProperty boolean magic
+    const jql = sqlToJql(sqlWhere);
+    const mySearch = data.filter(a => {
+        return eval(jql); 
+     });
+
+     return mySearch;
 }
 
 /**
@@ -1333,5 +1381,6 @@ function arrayQuery (data, rqlQuery, options = {}) {
 }
 
 module.exports = () => ({
-    arrayQuery
+    arrayQuery,
+    jqlArrayQuery
 });
