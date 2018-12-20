@@ -113,7 +113,7 @@ function sqlToJql (sqlWhere, opts) {
 
 // todo rename to AQL - attribute query language/logic
 //                AQF - attribute query format
-function sqlArrayQuery (data, sqlWhere, attribAsProperty = false) {
+function sqlArrayFilter (data, sqlWhere, attribAsProperty = false) {
     // attribAsProperty means where the attribute lives in relation to the array
     // {att} is a standard key-value object of attributes
     // [ {att} , {att}] would be the false case.  this is the format of attributes from the geoApi attribute loader
@@ -129,6 +129,8 @@ function sqlArrayQuery (data, sqlWhere, attribAsProperty = false) {
     };
     const jql = sqlToJql(sqlWhere, opts);
     console.log('Here is some JQL: ' + jql);
+
+    // important. the iterator var needs to be called `a` as it is used inside the eval to reference the item
     const mySearch = data.filter(a => {
         return eval(jql); 
      });
@@ -136,6 +138,35 @@ function sqlArrayQuery (data, sqlWhere, attribAsProperty = false) {
      return mySearch;
 }
 
+// variant of above function.  customized for turning graphics visibility on and off.
+// since we need to turn off the items "not in the query", this saves us doing multiple iterations.
+function sqlArrayGraphicSpecial (graphics, sqlWhere, attribAsProperty = true) {
+    // attribAsProperty means where the attribute lives in relation to the array
+    // {att} is a standard key-value object of attributes
+    // [ {att} , {att}] would be the false case.  this is the format of attributes from the geoApi attribute loader
+    // [ {attributes:{att}}, {attributes:{att}}] would be the true case. this is the format of attributes sitting in the graphics array of a filebased layer
+
+    // convert the sql where clause to a javascript boolean expression, then use it in an array filter,
+    // leveraging the power of the mighty eval()
+
+    // important. this var needs to be called `opts` as it is used inside the eval (as an efficieny trick)
+    const opts = {
+        attObj: attribAsProperty ? 'a.attributes.' : 'a.',
+        inArrays: []
+    };
+    const jql = sqlToJql(sqlWhere, opts);
+    console.log('Here is some JQL: ' + jql);
+    // important. the iterator var needs to be called `a` as it is used inside the eval to reference the item
+    graphics.forEach(a => {
+        if (eval(jql)) {
+            a.show();
+        } else {
+            a.hide();
+        }
+     });
+}
+
 module.exports = () => ({
-    sqlArrayQuery
+    sqlArrayFilter,
+    sqlArrayGraphicSpecial
 });

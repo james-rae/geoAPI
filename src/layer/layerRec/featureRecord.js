@@ -193,6 +193,37 @@ class FeatureRecord extends attribRecord.AttribRecord {
         loadPromises.push(pLD, pFC, pLS);
         Promise.all(loadPromises).then(() => {
             this._stateChange(shared.states.LOADED);
+
+            // JQL test.
+            // test is for https://geo.weather.gc.ca/geomet/features/collections/ahccd-trends/items?measurement_type__type_mesure=temp_max&period__periode=Ann
+
+            /*
+            // this variant is for using the raw sql filter approach.
+
+            // TODO think about how to make this more efficient.
+            //      we have:
+            //          iterate graphics to get query set (.filter)
+            //          iterate query set to extract OIDs (.map)
+            //          iterate graphics to do visibility (.forEach)
+            //              iterate query set for each graphic. (.includes)
+            //      alternate solution:
+            //          our query engine no longer does a filter.
+            //          it takes a function and does a foreach on it.  function is executed if the JQL IF passes.
+            //          we could have both options. one does filter, one does apply (or whatever the standard array function is named)
+            var filterSet = this._apiRef.rql.sqlArrayFilter(this._layer.graphics, 'province__province = "AB"', true)
+                .map(g => g.attributes.OBJECTID);
+            this._layer.graphics.forEach(g => {
+                if (filterSet.includes(g.attributes.OBJECTID)) {
+                    g.show();
+                } else {
+                    g.hide();
+                }
+            });
+            */
+
+            // this variant uses the special graphics efficiency approach
+            this._apiRef.rql.sqlArrayGraphicSpecial(this._layer.graphics, 'province__province = "AB"');
+
         });
     }
 
