@@ -6,6 +6,7 @@ function sqlNodeToJql (node, opts) {
 
     // TODO figure out date fields
     // TODO add support for LIKE ?
+    // TODO add support for datatype casting?
 
     const typeReactor = {
         AndExpression: n => {
@@ -84,6 +85,9 @@ function sqlNodeToJql (node, opts) {
             // n.value here is an ExpressionList, but i've yet to see an instance where it has more than one element in the array.
             // TODO invest some time to try to find a case where there is > 1 element, and ensure the ExpressionList result
             //      formatting doesn't break the equation.
+            // TODO there could be some minor optimization in removing the brackets from the expression list
+            //      or conversly not adding brackets here.  Would want to be confident we know n.value is
+            //      always an expression list. Not urgent, no harm in redundant brackets.
             return `(${sqlNodeToJql(n.value, opts)})`;
         }
     }
@@ -109,13 +113,11 @@ function sqlToJql (sqlWhere, opts) {
 
 // todo rename to AQL - attribute query language/logic
 //                AQF - attribute query format
-function sqlArrayQuery (data, sqlWhere) {
+function sqlArrayQuery (data, sqlWhere, attribAsProperty = false) {
     // attribAsProperty means where the attribute lives in relation to the array
     // {att} is a standard key-value object of attributes
     // [ {att} , {att}] would be the false case.  this is the format of attributes from the geoApi attribute loader
     // [ {attributes:{att}}, {attributes:{att}}] would be the true case. this is the format of attributes sitting in the graphics array of a filebased layer
-    // TODO turn this into optional param default false
-    const attribAsProperty = false;
 
     // convert the sql where clause to a javascript boolean expression, then use it in an array filter,
     // leveraging the power of the mighty eval()
