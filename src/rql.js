@@ -2,7 +2,124 @@
 
 const sqlParser = require('js-sql-parser');
 
-function sqlNodeToJql (node, opts) {
+// for science.  and if we have a common property we can add here
+class QryRoot {
+}
+
+class QryAtomic extends QryRoot {
+    constructor (val) {
+        super();
+        this.value = val;
+    }
+}
+
+class QryDiatomic extends QryRoot {
+    constructor (left, right) {
+        super();
+        this.left = left;
+        this.right = right;
+    }
+}
+
+class QryLiteral extends QryAtomic {
+    // constructor param is the literal value
+
+    eval () {
+        return this.value;
+    }
+}
+
+class QryIdentifier extends QryAtomic {
+    // constructor param is the property name of the attribute
+
+    eval (attribute) {
+        return attribute[this.value];
+    }
+}
+
+class QryArray extends QryAtomic {
+    // constructor param is the array
+
+    eval () {
+        return this.value;
+    }
+}
+
+class QryEquals extends QryDiatomic {
+    eval (attribute) {
+        return this.left.eval(attribute) === this.right.eval(attribute);
+    }
+}
+
+class QryNotEquals extends QryDiatomic {
+    eval (attribute) {
+        return this.left.eval(attribute) !== this.right.eval(attribute);
+    }
+}
+
+class QryGreaterEquals extends QryDiatomic {
+    eval (attribute) {
+        return this.left.eval(attribute) >= this.right.eval(attribute);
+    }
+}
+
+class QryLessEquals extends QryDiatomic {
+    eval (attribute) {
+        return this.left.eval(attribute) <= this.right.eval(attribute);
+    }
+}
+
+class QryGreater extends QryDiatomic {
+    eval (attribute) {
+        return this.left.eval(attribute) > this.right.eval(attribute);
+    }
+}
+
+class QryLess extends QryDiatomic {
+    eval (attribute) {
+        return this.left.eval(attribute) < this.right.eval(attribute);
+    }
+}
+
+class QryAnd extends QryDiatomic {
+    eval (attribute) {
+        return this.left.eval(attribute) && this.right.eval(attribute);
+    }
+}
+
+class QryOr extends QryDiatomic {
+    eval (attribute) {
+        return this.left.eval(attribute) || this.right.eval(attribute);
+    }
+}
+
+class QryIn extends QryDiatomic {
+    constructor (left, right, hasNot) {
+        super(left, right);
+        this.hasNot = hasNot;
+    }
+
+    eval (attribute) {
+        // we assume .right is an array (QryArray)
+        const result = this.right.eval(attribute).includes(this.left.eval(attribute));
+        return this.hasNot ? !result : result;
+    }
+}
+
+class QryNot extends QryAtomic {
+    eval (attribute) {
+        return !this.value.eval(attribute);
+    }
+}
+
+class QryParentheses extends QryAtomic {
+    eval (attribute) {
+        // INTENSE
+        return this.value.eval(attribute);
+    }
+}
+
+function sqlNodeToAqlNode (node) {
 
     // TODO figure out date fields
     // TODO add support for LIKE ?
@@ -10,105 +127,110 @@ function sqlNodeToJql (node, opts) {
 
     const typeReactor = {
         AndExpression: n => {
-            return `(${sqlNodeToJql(n.left, opts)} && ${sqlNodeToJql(n.right, opts)})`;
+            return new QryAnd(sqlNodeToAqlNode(n.left), sqlNodeToAqlNode(n.right));
         },
         OrExpression: n => {
-            return `(${sqlNodeToJql(n.left, opts)} || ${sqlNodeToJql(n.right, opts)})`;
+            return new QryOr(sqlNodeToAqlNode(n.left), sqlNodeToAqlNode(n.right));
         },
         NotExpression: n => {
-            return `!(${sqlNodeToJql(n.value, opts)})`; // nice function...not
+            return new QryNot(sqlNodeToAqlNode(n.value));
         },
         InExpressionListPredicate: n => {
-            // converts to array, does an includes call on it. adds not if needed
-            // rather than encode the array in the primary string, we eval() and
-            // store it here. Being in the main string means large arrays of OIDs
-            // would get eval-parsed for every item in the array being searched.
-            // this trick means eval'ing it once.
-            const list = eval(`[${sqlNodeToJql(n.right, opts)}]`);
-            opts.inArrays.push(list);
-            return `(${n.hasNot ? '!' : ''}opts.inArrays[${opts.inArrays.length - 1}].includes(${sqlNodeToJql(n.left, opts)}))`;
+            return new QryIn(sqlNodeToAqlNode(n.left), sqlNodeToAqlNode(n.right), !!n.hasNot);
         },
         ComparisonBooleanPrimary: n => {
             // TODO wrap lefts and rights in brackets?
 
             const operatorMap = {
-                '=': '===',
-                '==': '===',
-                '===': '===',
-                '>': '>',
-                '>=': '>=',
-                '<': '<',
-                '<=': '<=',
-                '!=': '!==',
-                '!==': '!=='
+                '=': QryEquals,
+                '==': QryEquals,
+                '===': QryEquals,
+                '>': QryGreater,
+                '>=': QryGreaterEquals,
+                '<': QryLess,
+                '<=': QryLessEquals,
+                '!=': QryNotEquals,
+                '!==': QryNotEquals
             };
 
-            const jqlOp = operatorMap[n.operator];
-            if (!jqlOp) {
-                console.error('Encountered unsupported operator in filter. Unhandled operator: ' + n.operator);
-                // TODO consider doing hard error
-                return "(true)";
+            const aqlClass = operatorMap[n.operator];
+            if (!aqlClass) {
+                throw new Error('Encountered unsupported operator in filter. Unhandled operator: ' + n.operator);
             }
 
-            return `(${sqlNodeToJql(n.left, opts)} ${jqlOp} ${sqlNodeToJql(n.right, opts)})`;
+            return new aqlClass(sqlNodeToAqlNode(n.left), sqlNodeToAqlNode(n.right));
         },
         Identifier: n => {
-            // tack the object containing the attributes to the attribute name
-            return opts.attObj + n.value;
+            return new QryIdentifier(n.value);
         },
         Number: n => {
             // number in string form
-            return n.value;
+            return new QryLiteral(Number(n.value));
         },
         String: n => {
-            // if enclosed in doublequotes or escaped double quotes, change to single quotes
+            // remove embedded quotes from string
             // TODO check if escaped double quote actually exists or was just part of that debug form
-            // TODO is is possible for the library to pass in a value that is not wrapped in quotes?
             let s = n.value;
-            if (s.startsWith('"')) {
-                s = `'${s.substring(1, s.length - 1)}'`;
+            if (s.startsWith('"') || s.startsWith(`'`)) {
+                s = s.substring(1, s.length - 1);
             } else if (s.startsWith('\"')) {
-                s = `'${s.substring(2, s.length - 2)}'`;
+                s = s.substring(2, s.length - 2);
             }
-            return s;
+            return new QryLiteral(s);
         },
         Boolean: n => {
             // node values are in all caps
-            return n.value.toLowerCase();
+            return new QryLiteral(n.value.toLowerCase() === 'true');
         },
         ExpressionList: n => {
-            // returns in "array guts format". i.e. comma separated, but does not put [ ] around it.
-            // parent of the expression list needs to determine what to do with the guts.
-            return n.value.map(nn => sqlNodeToJql(nn, opts)).join();
+            // this code currently assumes that items in the expression list are literals.
+            // if we need any dynamically generated stuff (i.e. checking against other attribute properties)
+            // then this needs to change and the guts of QryArray.eval needs to generate the array at
+            // every call (way less efficient)
+            return new QryArray(n.value.map(nn => sqlNodeToAqlNode(nn).eval()));
         },
         SimpleExprParentheses: n => {
             // n.value here is an ExpressionList, but i've yet to see an instance where it has more than one element in the array.
+            // for now we do a hack hoist up the first element. This hack lets us pre-evaluate other expression lists
+            // that are filled with constants.
+
             // TODO invest some time to try to find a case where there is > 1 element, and ensure the ExpressionList result
             //      formatting doesn't break the equation.
             // TODO there could be some minor optimization in removing the brackets from the expression list
             //      or conversly not adding brackets here.  Would want to be confident we know n.value is
             //      always an expression list. Not urgent, no harm in redundant brackets.
-            return `(${sqlNodeToJql(n.value, opts)})`;
+
+            if (n.value.type === 'ExpressionList') {
+                if (n.value.value.length > 1) {
+                    console.warn(`While converting SQL to AQL, encountered a parsed bracket containing an ExpressionList with more than one element`, n.value);
+                }
+                return new QryParentheses(sqlNodeToAqlNode(n.value.value[0]));
+            } else {
+                // warn, and hail mary that we can just parse it
+                console.warn(`While converting SQL to AQL, encountered a parsed bracket containing ${n.value.type} instead of ExpressionList`);
+                return new QryParentheses(sqlNodeToAqlNode(n.value));
+            }
+
+
         }
     }
 
     if (!typeReactor[node.type]) {
-        console.error('Encountered unsupported query in filter. Unhandled type: ' + node.type);
-        return ''; // TODO determine if we should throw a hard error
+        throw new Error('Encountered unsupported query in filter. Unhandled type: ' + node.type);
     } else {
         return typeReactor[node.type](node);
     }
 }
 
 // TODO consider having a storage facility for IN arrays to avoid having to eval() parse them for every element
-function sqlToJql (sqlWhere, opts) {
+function sqlToAql (sqlWhere) {
 
     const fakeSQL = 'SELECT muffins FROM pod WHERE ' + sqlWhere;
 
     // the sqlParser will construct an object tree of the sql statement. we then iterate through the where clause tree
     // and covert each node to the equivalent javascript expression
     const queryTree = sqlParser.parse(fakeSQL);
-    return sqlNodeToJql(queryTree.value.where, opts);
+    return sqlNodeToAqlNode(queryTree.value.where);
 }
 
 // todo rename to AQL - attribute query language/logic
@@ -119,23 +241,20 @@ function sqlArrayFilter (data, sqlWhere, attribAsProperty = false) {
     // [ {att} , {att}] would be the false case.  this is the format of attributes from the geoApi attribute loader
     // [ {attributes:{att}}, {attributes:{att}}] would be the true case. this is the format of attributes sitting in the graphics array of a filebased layer
 
-    // convert the sql where clause to a javascript boolean expression, then use it in an array filter,
-    // leveraging the power of the mighty eval()
+    // convert the sql where clause to an attribute query language tree, then
+    // use that to evaluate against each attribute.
+    const aql = sqlToAql(sqlWhere);
 
-    // important. this var needs to be called `opts` as it is used inside the eval (as an efficieny trick)
-    const opts = {
-        attObj: attribAsProperty ? 'a.attributes.' : 'a.',
-        inArrays: []
-    };
-    const jql = sqlToJql(sqlWhere, opts);
-    console.log('Here is some JQL: ' + jql);
-
-    // important. the iterator var needs to be called `a` as it is used inside the eval to reference the item
-    const mySearch = data.filter(a => {
-        return eval(jql); 
-     });
-
-     return mySearch;
+    // split in two to avoid doing boolean check at every iteration
+    if (attribAsProperty) {
+        return data.filter(a => {
+            return aql.eval(a.attributes); 
+         });
+    } else {
+        return data.filter(a => {
+            return aql.eval(a); 
+         });
+    }
 }
 
 // variant of above function.  customized for turning graphics visibility on and off.
@@ -154,7 +273,7 @@ function sqlArrayGraphicSpecial (graphics, sqlWhere, attribAsProperty = true) {
         attObj: attribAsProperty ? 'a.attributes.' : 'a.',
         inArrays: []
     };
-    const jql = sqlToJql(sqlWhere, opts);
+    const jql = sqlToJql(sqlWhere);
     console.log('Here is some JQL: ' + jql);
     // important. the iterator var needs to be called `a` as it is used inside the eval to reference the item
     graphics.forEach(a => {
